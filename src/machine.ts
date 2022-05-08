@@ -60,7 +60,7 @@ export function onConfigure(conf:IConfig, mqtt:MqttClient, log = false) {
           console.error(`Gpio ${pin.gpio} watch failed. ${err}`);
           // TODO publish error
         } else {
-          if (log) console.info(`Publishing value of gpio ${pin.gpio} to ${topic}`);
+          if (log) console.info(`Publishing value of gpio ${pin.gpio} (${value ? 'ON' : 'OFF'}) to ${topic}`);
           mqtt.publish(topic, value.toString());
         }
       });
@@ -81,7 +81,7 @@ export function onMessage(topic:string, payload:Buffer, log = false) {
     if (sub.topic !== topic) return;
     const s = payload.toString().toLowerCase();
     const value:BinaryValue = s === '1' || s === 'on' || s === 'true' ? 1 : 0;
-    if (log) console.info(`Writing payload of ${topic} to gpio ${sub.gpio}...`);
+    if (log) console.info(`Writing payload (${value ? 'ON' : 'OFF'}) of ${topic} to gpio ${sub.gpio}...`);
     sub.io?.write(value, (err) => {
       if (err) {
         console.error(`Failed to write payload of ${topic} to gpio ${sub.gpio}. ${err}`);
