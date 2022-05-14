@@ -3,98 +3,120 @@ import { MqttClient } from 'mqtt';
 import type { BinaryValue, Direction, Edge, Options } from 'onoff';
 import { Gpio } from 'onoff';
 
+export interface IPin {
+  topic: string;
+  gpio: number;
+  direction: Direction | 'watch';
+  edge?: Edge;
+  options?: Options;
+}
 export interface IConfig {
   topicPrefix?: string;
-  pins: {
-    gpio: number;
-    direction: Direction;
-    edge?: Edge;
-    options?: Options;
-    topic?: string;
-  }[];
+  pins: IPin[];
 }
 export interface ISubscription {
-  gpio: number;
   topic: string;
-  subscribed?: boolean;
+  topicSub: string;
+  topicPub: string;
+  topicErr: string;
+  gpio: number;
   io: Gpio | null;
-  watching?: boolean;
-  prevValue?: BinaryValue;
+  direction: Direction | 'watch';
+  prevWatchValue?: BinaryValue;
 }
 
-let subscriptions:Map<number, ISubscription>;
+const pad = (n:number) => n > 9 ? n.toString() : ` ${n}`;
 
-export function onConfigure(conf:IConfig, mqtt:MqttClient, log = false) {
-  
-  // setup new subscriptions
-  const prefix = conf.topicPrefix ?? 'onoff';
-  const subs = new Map<number, ISubscription>();
-  conf.pins.forEach(pin => {
-    const io = Gpio.accessible ? new Gpio(pin.gpio, pin.direction, pin.edge, pin.options) : null;
-    const topic = pin.topic ?? `${prefix}/${pin.direction}/${pin.gpio}`;
-    let sub = subs.get(pin.gpio);
-    if (sub) {
-      if (log) console.warn(`Ignoring duplicate configuration for gpio ${pin.gpio} (${pin.direction}).`);
-      return;
-    } else {
-      sub = { gpio:pin.gpio, topic, io };
-      subs.set(pin.gpio, sub);
-    }
-    if (pin.direction === 'in') {
-      // TODO: as alternative to `watch` add a subscription for reading queues 
-      io?.watch((err, value) => {
+const subscriptions = new Map<number, ISubscription>();
+
+const configPin = (pin:IPin, mqtt:MqttClient, appTopic: string, log = false) => {
+  let sub: ISubscription;
+  if (subscriptions.has(pin.gpio)) {
+    if (log) console.info(`Recycling previously configured GPIO ${pin.gpio}`);
+    //clean up
+    sub = subscriptions.get(pin.gpio) as ISubscription;
+    mqtt.unsubscribe(sub.topicSub);
+    if (sub.direction === 'watch') sub.io?.unwatch();
+    subscriptions.delete(pin.gpio);
+  }
+
+  // set up
+  sub = {
+    gpio: pin.gpio,
+    topic: pin.topic,
+    topicPub: `tele/${appTopic}/${pin.topic}`,
+    topicSub: `cmnd/${appTopic}/${pin.topic}`,
+    topicErr: `tele/${appTopic}/error/${pin.topic}`,
+    direction: pin.direction,
+    io: Gpio.accessible ? new Gpio(pin.gpio, pin.direction === 'watch' ? 'in' : pin.direction, pin.edge, pin.options) : null
+  };
+  if (pin.direction === 'watch' || pin.direction === 'in') {
+    if (pin.direction === 'watch') sub.io?.watch((err, value) => {
+      if (err) {
+        try {
+          mqtt.publish(sub.topicErr, JSON.stringify({ ...err, description:`GPIO ${sub.gpio} watch failed` }));
+        } catch (error) {
+          console.error(`[!] Failed to watch payload of ${sub.topic} from gpio ${sub.gpio} (due to ${err}) and failed to publish it to MQTT (due to ${error}).`);
+        }
+      } else {
+        if (value === sub?.prevWatchValue) return; // my circuit could be causing these OFF values when I remotely switch a light on
+        if (sub) sub.prevWatchValue = value;
+        if (log) console.info(`${value ? '[ON] ' : '[OFF]'} ${pad(sub.gpio)} -> ${sub.topicPub}.`);
+        mqtt.publish(sub.topicPub, value.toString());
+      }
+    });
+    if (log) console.info(`Input ${pad(sub.gpio)} -> ${sub.topicPub} (${pin.direction === 'watch' ? '' : 'NO '}WATCH). R.O.D.: ${sub.topicSub}.`);
+  } else {
+    if (log) console.info(`Output ${pad(sub.gpio)} <- ${sub.topicSub}. Ack. to ${sub.topicPub}`);
+  }
+  mqtt.subscribe(sub.topicSub);
+  subscriptions.set(sub.gpio, sub);
+};
+
+export function onConfigure(conf:IConfig|IPin, mqtt:MqttClient, appTopic:string, log = false) {
+  if ('pins' in conf) { // all pins
+    const pins = conf.pins;
+    if (log) console.info(`Configuring ${pins.length} pins...`);
+    pins.forEach(pin => configPin(pin, mqtt, appTopic, log));
+    if (log) console.info(`Completed configuration of ${pins.length} pins.`);
+  } else if ('gpio' in conf && 'direction' in conf) { // individual pin
+    configPin(conf, mqtt, appTopic, log);
+  }
+}
+
+export function onMessage(topic:string, payload:Buffer, mqtt:MqttClient, log = false) {
+  subscriptions.forEach((sub) => {
+    if (sub.topicSub !== topic) return;
+    if (sub.direction === 'watch' || sub.direction === 'in') {
+      // READ ON DEMAND
+      sub.io?.read((err, value) => {
         if (err) {
-          console.error(`Gpio ${pin.gpio} watch failed. ${err}`);
-          // TODO publish error
+          try {
+            mqtt.publish(sub.topicErr, JSON.stringify({ ...err, description:`GPIO ${sub.gpio} read failed` }));
+          } catch (error) {
+            console.error(`[!] Failed to read payload of ${sub.topic} from gpio ${sub.gpio} (due to ${err}) and failed to publish it to MQTT (due to ${error}).`);
+          }
         } else {
-          if (value === sub?.prevValue) return; // my circuit could be causing these OFF values when I remotely switch a light on
-          if (sub) sub.prevValue = value;
-          if (log) console.info(`Publishing value of gpio ${pin.gpio} (${value ? 'ON' : 'OFF'}) to ${topic}`);
-          mqtt.publish(topic, value.toString());
+          if (log) console.info(`${value ? '[ON] ' : '[OFF]'} ${pad(sub.gpio)} -> ${sub.topicPub}. (R.O.D.)`);
+          mqtt.publish(sub.topicPub, value.toString());
         }
       });
-      sub.watching = true;
-      if (log) console.info(`Watching gpio ${pin.gpio} -> ${topic}`);
     } else {
-      mqtt.subscribe(topic);
-      sub.subscribed = true;
-      if (log) console.info(`Ready to write to gpio ${pin.gpio} <- ${topic}`);
+      // 
+      const s = payload.toString().toLowerCase();
+      const value:BinaryValue = s === '1' || s === 'on' || s === 'true' ? 1 : 0;
+      if (log) console.info(`${value ? '[ON] ' : '[OFF]'} ${pad(sub.gpio)} <- ${sub.topicPub}`);
+      sub.io?.write(value, (err) => {
+        if (err) {
+          try {
+            mqtt.publish(sub.topicErr, JSON.stringify({ ...err, description:`GPIO ${sub.gpio} write failed` }));
+          } catch (error) {
+            console.error(`[!] Failed to write payload of ${sub.topic} to gpio ${sub.gpio} (due to ${err}) and failed to publish it to MQTT (due to ${error}).`);
+          }
+        } else {
+          mqtt.publish(sub.topicPub, value.toString());
+        }
+      });
     }
-  });
-  if (log) console.info(`Configuration completed with ${subs.size} pins.`);
-  // clean the previous subscriptions
-  if (subscriptions?.size && log) {
-    console.info(`Clearing previous ${subscriptions.size} gpio configurations`);
-    subscriptions.forEach(sub => {
-      if (sub.topic && sub.subscribed) {
-        mqtt.unsubscribe(sub.topic);
-        sub.subscribed = false;
-      }
-      if (sub.io && sub.watching) {
-        sub.io.unwatch();
-        sub.watching = false;
-      }
-    });
-    subscriptions.clear();
-  }
-  subscriptions = subs;
-  return prefix;
-}
-
-export function onMessage(topic:string, payload:Buffer, log = false) {
-  subscriptions.forEach((sub) => {
-    if (sub.topic !== topic) return;
-    const s = payload.toString().toLowerCase();
-    const value:BinaryValue = s === '1' || s === 'on' || s === 'true' ? 1 : 0;
-    if (log) console.info(`Writing payload (${value ? 'ON' : 'OFF'}) of ${topic} to gpio ${sub.gpio}...`);
-    sub.io?.write(value, (err) => {
-      if (err) {
-        console.error(`Failed to write payload of ${topic} to gpio ${sub.gpio}. ${err}`);
-        //TODO: publish error
-      } else {
-        if (log) console.info(`Wrote payload of ${topic} to gpio ${sub.gpio}.`);
-        // TODO: publish confirmation
-      }
-    });
   });
 }

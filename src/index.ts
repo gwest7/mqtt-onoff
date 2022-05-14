@@ -4,15 +4,15 @@ import { existsSync, readFileSync } from 'node:fs';
 import * as yargs from 'yargs';
 import { onConfigure, onMessage } from './machine';
 
+
 const argv = yargs(process.argv.slice(2))
   .usage('Usage: $0 [options]')
-  .example('$0 -c mqtt://localhost:1883 -t onoff_conf', 'Connects to MQTT broker and waits for configuration on the specified topic.')
+  .example('$0 -c mqtt://localhost:1883', 'Connects to MQTT broker ready to receive a configuration paylaod.')
   .describe({
     c: 'MQTT connect URL',
     u: 'MQTT broker username',
     p: 'MQTT broker password',
-    t: 'Configuration topic',
-    s: 'Status topic',
+    t: 'Topic',
     l: 'Log level: 0=off, 1=info',
   })
   .alias({
@@ -20,15 +20,13 @@ const argv = yargs(process.argv.slice(2))
     u: 'username',
     p: 'password',
     t: 'topic',
-    s: 'stat',
     l: 'log',
   })
   .default({
     c: 'mqtt://localhost:1883',
     u: '',
     p: '',
-    t: 'cmnd/onoff/configure',
-    s: 'tele/onoff',
+    t: 'onoff',
     l: 0,
   })
   .help('q')
@@ -41,8 +39,7 @@ if (existsSync('.mqtt-onoff.json')) {
     if (config.url) process.env.MQTT_URL = config.url;
     if (config.username) process.env.MQTT_USERNAME = config.username;
     if (config.password) process.env.MQTT_PASSWORD = config.password;
-    if (config.configTopic) process.env.MQTT_ONOFF_CONFIG_TOPIC = config.configTopic;
-    if (config.statusTopic) process.env.MQTT_ONOFF_STATUS_TOPIC = config.statusTopic;
+    if (config.topic) process.env.MQTT_TOPIC = config.topic;
     if (config.log) process.env.MQTT_ONOFF_LOG = config.log;
   } catch (error) {
     console.error('Error reading config.', error);
@@ -51,11 +48,13 @@ if (existsSync('.mqtt-onoff.json')) {
 
 const log = !!(process.env.MQTT_ONOFF_LOG || argv.l);
 const url = process.env.MQTT_URL || argv.c || 'mqtt://localhost:1883';
-const configTopic = process.env.MQTT_ONOFF_CONFIG_TOPIC || argv.t || 'cmnd/onoff/configure';
-const statusTopic = process.env.MQTT_ONOFF_STATUS_TOPIC || argv.s || 'tele/onoff/status';
+const topic = process.env.ONOFF_TOPIC || argv.t || 'onoff';
+const topicStatus = `tele/${topic}/status`;
+const topicConfig = `cmnd/${topic}/configure`;
+
 const opts:IClientOptions = {
   will: {
-    topic: statusTopic,
+    topic: topicStatus,
     payload: 'Offline',
     retain: true,
     qos: 0,
@@ -80,25 +79,25 @@ if (typeof url === 'string') {
 
 if (log) mqtt.on('connect', () => console.log('MQTT connected.'));
 
-mqtt.on('message', (topic,payload) => {
-  if (topic === configTopic) {
+mqtt.on('message', (t, payload) => {
+  if (t === topicConfig) {
     if (log) console.info('Configuration received.');
     try {
       const conf = JSON.parse(payload.toString());
-      onConfigure(conf, mqtt, log);
+      onConfigure(conf, mqtt, topic, log);
     } catch (error) {
       console.error(`Ignoring invalid configuration. Reason: ${error}`);
     }
   } else {
-    onMessage(topic, payload, log);
+    onMessage(t, payload, mqtt, log);
   }
 });
 
-mqtt.subscribe(configTopic);
-if (log) console.info(`Subscribed to ${configTopic}.`);
+mqtt.subscribe(topicConfig);
+if (log) console.info(`Subscribed to ${topicConfig} and ready to receive a configuration.`);
 
 // update status
-mqtt.publish(statusTopic, 'Online');
+mqtt.publish(topicStatus, 'Online', {retain: true});
 
 function endMqtt() {
   return new Promise((resolve,reject) => {

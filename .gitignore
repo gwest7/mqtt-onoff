@@ -1,3 +1,4 @@
 node_modules
-.mqtt-onoff.json
 lib
+.mqtt-onoff.json
+example-configure.json

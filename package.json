@@ -1,8 +1,9 @@
 {
   "name": "mqtt-onoff",
-  "version": "1.0.0",
-  "description": "Basic MQTT-onoff bridge.",
+  "version": "2.0.0",
+  "description": "MQTT-onoff bridge.",
   "main": "lib/index.js",
+  "bin": "lib/index.js",
   "files": [
     "lib/**/*"
   ],
@@ -24,8 +25,7 @@
   "keywords": [
     "mqtt",
     "onoff",
-    "gpio",
-    "cli"
+    "gpio"
   ],
   "author": "gwest7",
   "license": "MIT",
