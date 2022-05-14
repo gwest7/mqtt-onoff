@@ -39,7 +39,7 @@ if (existsSync('.mqtt-onoff.json')) {
     if (config.url) process.env.MQTT_URL = config.url;
     if (config.username) process.env.MQTT_USERNAME = config.username;
     if (config.password) process.env.MQTT_PASSWORD = config.password;
-    if (config.topic) process.env.MQTT_TOPIC = config.topic;
+    if (config.topic) process.env.ONOFF_TOPIC = config.topic;
     if (config.log) process.env.MQTT_ONOFF_LOG = config.log;
   } catch (error) {
     console.error('Error reading config.', error);
