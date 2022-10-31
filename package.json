@@ -1,6 +1,6 @@
 {
-  "name": "mqtt-onoff",
-  "version": "2.0.1",
+  "name": "@binaryme/mqtt-onoff",
+  "version": "1.0.2",
   "description": "MQTT-onoff bridge.",
   "main": "lib/index.js",
   "bin": "lib/index.js",

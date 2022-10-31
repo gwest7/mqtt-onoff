@@ -29,6 +29,8 @@ const pad = (n:number) => n > 9 ? n.toString() : ` ${n}`;
 
 const subscriptions = new Map<number, ISubscription>();
 
+const getSubCount = () => subscriptions.size;
+
 const configPin = (pin:IPin, mqtt:MqttClient, appTopic: string, log = false) => {
   let sub: ISubscription;
   if (subscriptions.has(pin.gpio)) {
@@ -78,6 +80,7 @@ export function onConfigure(conf:IConfig|IPin, mqtt:MqttClient, appTopic:string,
     const pins = conf.pins;
     if (log) console.info(`Configuring ${pins.length} pins...`);
     pins.forEach(pin => configPin(pin, mqtt, appTopic, log));
+    mqtt.publish(`tele/${appTopic}/configured`, JSON.stringify({pins: getSubCount()}), {retain: true});
     if (log) console.info(`Completed configuration of ${pins.length} pins.`);
   } else if ('gpio' in conf && 'direction' in conf) { // individual pin
     configPin(conf, mqtt, appTopic, log);

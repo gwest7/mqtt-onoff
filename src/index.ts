@@ -39,7 +39,7 @@ if (existsSync('.mqtt-onoff.json')) {
     if (config.url) process.env.MQTT_URL = config.url;
     if (config.username) process.env.MQTT_USERNAME = config.username;
     if (config.password) process.env.MQTT_PASSWORD = config.password;
-    if (config.topic) process.env.ONOFF_TOPIC = config.topic;
+    if (config.topic) process.env.MQTT_TOPIC = config.topic;
     if (config.log) process.env.MQTT_ONOFF_LOG = config.log;
   } catch (error) {
     console.error('Error reading config.', error);
@@ -48,7 +48,7 @@ if (existsSync('.mqtt-onoff.json')) {
 
 const log = !!(process.env.MQTT_ONOFF_LOG || argv.l);
 const url = process.env.MQTT_URL || argv.c || 'mqtt://localhost:1883';
-const topic = process.env.ONOFF_TOPIC || argv.t || 'onoff';
+const topic = process.env.MQTT_TOPIC || argv.t || 'onoff';
 const topicStatus = `tele/${topic}/status`;
 const topicConfig = `cmnd/${topic}/configure`;
 
